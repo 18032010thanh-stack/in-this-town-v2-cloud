@@ -1,0 +1,193 @@
+name: V2 ONLY — production Blender test 11.87s
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v2-real-production-test.yml'
+      - 'source/In_This_Town_V2_OneClick_Cloud_11s.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: in-this-town-v2-test-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: V2 audit, Edge TTS, 44 camera rigs, real 3D stills and first full-resolution frame
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: in-this-town-kit-v2
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract exact V2-only 80-file archive (including all 64 originals)
+        working-directory: .
+        run: unzip -q source/In_This_Town_V2_OneClick_Cloud_11s.zip
+      - name: Install original V2 dependencies and Blender CPU
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y blender ffmpeg fonts-dejavu-core python3-venv
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Validate original V2 source, numerical data, and 13-shot sample
+        run: |
+          .venv/bin/python tools/v2_audit_all.py
+          .venv/bin/python verify.py --strict
+          .venv/bin/python tools/audit_numbers.py
+          .venv/bin/python -m unittest discover -s tests -v
+          .venv/bin/python tools/v2_preview_production.py prepare
+      - name: Validate original V2 44 rigs and 1516 frames of story geometry
+        env:
+          RT_ENGINE: CYCLES
+        run: |
+          cd ../_runtime_v2
+          blender -b --factory-startup --python tools/framing_check.py
+      - name: Generate real Vietnamese voice, original V2 textures, all 39 Blender stills
+        env:
+          RT_ENGINE: CYCLES
+          CAPTION_FONT: /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+        run: |
+          .venv/bin/python tools/v2_preview_production.py voice
+          .venv/bin/python tools/v2_preview_production.py textures
+          .venv/bin/python tools/v2_preview_production.py stills
+      - name: Benchmark first frame at full 1080x1920 with original V2 Blender
+        env:
+          RT_ENGINE: CYCLES
+        run: |
+          cd ../_runtime_v2
+          blender -b --factory-startup --python rt_render.py -- stories/v2_test_ep03.json --scale 100 --from 0 --to 0.04166
+      - name: Pack voice, word timings and timing markers for independent render jobs
+        run: |
+          mkdir -p _cloud_export/voice _cloud_export/previews
+          cp ../_runtime_v2/build/vo.wav ../_runtime_v2/build/words.json ../_runtime_v2/build/shots.json _cloud_export/voice/
+          cp ../_runtime_v2/build/frames/f_00000.jpg _cloud_export/previews/
+          cp ../_runtime_v2/build/stills/_sheet*.jpg _cloud_export/previews/
+      - uses: actions/upload-artifact@v6
+        with:
+          name: v2-production-voice-timings
+          path: in-this-town-kit-v2/_cloud_export/voice/
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        with:
+          name: v2-production-stills-and-fullres-smoke
+          path: in-this-town-kit-v2/_cloud_export/previews/
+          retention-days: 7
+          if-no-files-found: error
+      - name: Diagnostic stills and timing on preflight failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: v2-diagnostics
+          path: _runtime_v2/build/stills/_sheet*.jpg
+          if-no-files-found: warn
+          retention-days: 7
+
+  render:
+    name: Genuine V2 Blender CPU frame part ${{ matrix.part }}/3
+    needs: [preflight]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: in-this-town-kit-v2
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        part: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract exact V2-only 80-file archive (including all 64 originals)
+        working-directory: .
+        run: unzip -q source/In_This_Town_V2_OneClick_Cloud_11s.zip
+      - name: Install Blender and original V2 runtime dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y blender ffmpeg fonts-dejavu-core python3-venv
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Reconstruct pristine original V2 runtime with local compatibility fixes
+        run: .venv/bin/python tools/v2_preview_production.py prepare
+      - uses: actions/download-artifact@v7
+        with:
+          name: v2-production-voice-timings
+          path: in-this-town-kit-v2/_cloud_input/voice/
+      - name: Restore original V2 voice and timed words
+        run: |
+          mkdir -p ../_runtime_v2/build/
+          cp _cloud_input/voice/vo.wav _cloud_input/voice/words.json _cloud_input/voice/shots.json ../_runtime_v2/build/
+      - name: Render exact original V2 frames with mod-3 partitioning
+        env:
+          RT_ENGINE: CYCLES
+        run: |
+          cd ../_runtime_v2
+          blender -b --factory-startup --python rt_render.py -- stories/v2_test_ep03.json --scale 100 --part ${{ matrix.part }}/3
+      - name: Verify full resolution and count for this 3D segment
+        run: .venv/bin/python tools/v2_cloud_parts.py validate --part ${{ matrix.part }}
+      - name: Package generated original V2 frame JPEGs
+        run: |
+          mkdir -p _cloud_export/frames
+          cp ../_runtime_v2/build/frames/f_*.jpg _cloud_export/frames/
+      - uses: actions/upload-artifact@v6
+        with:
+          name: v2-production-frames-${{ matrix.part }}
+          path: in-this-town-kit-v2/_cloud_export/frames/
+          retention-days: 7
+          if-no-files-found: error
+
+  assemble:
+    name: Original V2 finish — word highlight, original grading, Vietnamese voice
+    needs: [render]
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    defaults:
+      run:
+        working-directory: in-this-town-kit-v2
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract exact V2-only 80-file archive (including all 64 originals)
+        working-directory: .
+        run: unzip -q source/In_This_Town_V2_OneClick_Cloud_11s.zip
+      - name: Install original V2 finishing toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-dejavu-core python3-venv
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Prepare original V2 runtime and patched nonzero scene timing
+        run: .venv/bin/python tools/v2_preview_production.py prepare
+      - uses: actions/download-artifact@v7
+        with:
+          name: v2-production-voice-timings
+          path: in-this-town-kit-v2/_cloud_input/voice/
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: v2-production-frames-*
+          merge-multiple: true
+          path: in-this-town-kit-v2/_cloud_input/frames/
+      - name: Restore original V2 voice, shot markers and Blender frames
+        run: |
+          mkdir -p ../_runtime_v2/build/frames/
+          cp _cloud_input/voice/vo.wav _cloud_input/voice/words.json _cloud_input/voice/shots.json ../_runtime_v2/build/
+          cp _cloud_input/frames/f_*.jpg ../_runtime_v2/build/frames/
+      - name: Verify all 285 frames and assemble genuine V2 clip
+        env:
+          RT_ENGINE: CYCLES
+          CAPTION_FONT: /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+        run: |
+          .venv/bin/python tools/v2_cloud_parts.py validate-all
+          .venv/bin/python tools/v2_preview_production.py finish
+          mkdir -p _cloud_export/final
+          cp ../_runtime_v2/build/FINAL.mp4 ../_runtime_v2/build/test_v2_vietsub.srt _cloud_export/final/
+      - uses: actions/upload-artifact@v6
+        with:
+          name: V2-ep03-real-3D-test-11s
+          path: in-this-town-kit-v2/_cloud_export/final/
+          if-no-files-found: error
+          retention-days: 7
