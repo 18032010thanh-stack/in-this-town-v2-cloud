@@ -12,6 +12,10 @@ For any new Blender project, animation, video, ZIP/asset pack, preview render or
 
 The existing root V2 production test is historical project-specific material, **not the default source of style or assets** for new tasks.
 
-## Autonomous render → visual inspection → fix loop
+## Codex Cloud with ChatGPT Plus — no OpenAI API key
 
-For any NEW Blender project whose preview render needs iterative improvements, invoke the reusable workflow at `.github/workflows/blender-visual-autopilot.yml` as specified in the `blender-github-autopilot` skill. Have the NEW project provide its own `projects/<slug>/render-preview.sh`, `ci-setup.sh` if needed, and a project-scoped push trigger. Codex will inspect a contact sheet of three actual Blender frames, edit only that project, rerender (up to 3 render rounds), and open a review PR for changes when permitted. Do not reuse style or assets from this repository's V2 production test. Require `OPENAI_API_KEY` as a GitHub Actions secret; never put the API key in source code or conversation. The workflow does not self-start until a new project-specific trigger is committed or a manual run is requested.
+For new projects, use the [blender-github-autopilot](.agents/skills/blender-github-autopilot/SKILL.md) skill. The project-scoped GitHub Actions workflow `.github/workflows/blender-visual-autopilot.yml` renders **real Blender previews only**, saves a 3-frame QA strip, and publishes a video artifact. It does **not** run Codex inside CI.
+
+While carrying out an active **Codex Cloud** task, Codex must read the actual GitHub run and artifact, examine the images against that project's own style and assets, fix relevant source code, push a project-specific change and rerender (maximum three previews/two correction rounds). Do not copy assets, material or style from the existing V2 project. Don't claim the AI will run unattended after the Codex task has finished.
+
+**No `OPENAI_API_KEY` secret is required or requested.** The user's ChatGPT Plus includes eligible Codex use subject to plan limits; GitHub Actions rendering still has separate resource limits. A specific new project must provide its own audited renderer at `projects/<slug>/render-preview.sh` and a push-triggered driver, so the workflow is not started for historical V2 content by mistake.
