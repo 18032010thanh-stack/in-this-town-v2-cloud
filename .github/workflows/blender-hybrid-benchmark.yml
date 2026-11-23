@@ -1,0 +1,76 @@
+name: Blender Hybrid Benchmark — three stills per shot
+on:
+  workflow_call:
+    inputs:
+      project_slug:
+        type: string
+        required: true
+      shot_ids:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      project_slug:
+        type: string
+        required: true
+        description: 'Isolated project in projects/<slug>'
+      shot_ids:
+        type: string
+        required: true
+        description: 'Comma-separated matching shot IDs, e.g. s001,s004'
+permissions:
+  contents: read
+concurrency:
+  group: blender-hybrid-benchmark-${{ github.ref }}-${{ inputs.project_slug }}
+  cancel-in-progress: false
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PROJECT_SLUG: ${{ inputs.project_slug }}
+      SHOT_IDS: ${{ inputs.shot_ids }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate project
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PROJECT_SLUG" =~ ^[a-z0-9][a-z0-9-]{1,62}$ ]] || exit 1
+          test -f "projects/$PROJECT_SLUG/render-stills.sh" || {
+            echo "::error::Missing independent project's render-stills.sh"
+            exit 1
+          }
+      - name: Install Blender, FFmpeg, optional approved dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          start=$SECONDS
+          sudo apt-get update -qq
+          sudo apt-get install -y blender ffmpeg
+          if [[ -f "projects/$PROJECT_SLUG/ci-setup.sh" ]]; then
+            bash "projects/$PROJECT_SLUG/ci-setup.sh"
+          fi
+          echo "SETUP_SECONDS=$((SECONDS-start))" >> "$GITHUB_ENV"
+      - name: Capture real per-shot images and time the workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/blender_hybrid_probe.py capture \
+            --host github --slug "$PROJECT_SLUG" --shots "$SHOT_IDS" \
+            --setup-seconds "$SETUP_SECONDS" --timeout 1800
+      - name: Upload benchmark frames and performance.json
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: hybrid-benchmark-${{ inputs.project_slug }}-${{ github.run_id }}
+          path: .render-loop/hybrid/github/
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Link exact benchmark evidence
+        if: success()
+        shell: bash
+        run: |
+          echo "Benchmark: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "All 3 images per shot + performance.json are in the artifact." >> "$GITHUB_STEP_SUMMARY"
+          echo "No OpenAI API key is used. Codex Cloud must compare actual results with local measurements." >> "$GITHUB_STEP_SUMMARY"
