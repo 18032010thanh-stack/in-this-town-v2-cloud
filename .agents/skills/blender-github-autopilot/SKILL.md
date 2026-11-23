@@ -124,3 +124,48 @@ Trước tiên làm đoạn test chất lượng sản xuất, không render ful
 ```
 
 **Important:** This document is a reusable orchestration skill, **not** a new rendering service, persistent daemon, account-level installation, or guaranteed authorization to spend cloud resources. The current user's more specific instructions always take precedence.
+
+
+## Automatic screenshot → code fix → rerender loop
+
+The reusable GitHub workflow `.github/workflows/blender-visual-autopilot.yml` supports new projects **independently of any old project's assets or style**.
+
+**Loop implemented (bounded to 3 renders, 2 Codex edits):**
+1. Run `projects/<slug>/render-preview.sh` using the current project's own Blender pipeline. The script must output a REAL playable video at `$AUTOPILOT_OUTPUT_DIR/preview.mp4` (0.5–30 seconds). Optional `projects/<slug>/ci-setup.sh` installs dependencies.
+2. Run `ffprobe`; extract three representative frames (early, middle, late) and construct `review_strip.png` from the actual video.
+3. Send that image with `--image` to `openai/codex-action@v1`; review ONLY the current project's references, camera, models, textures, materials, animation, lighting, framing, subtitles and audio. Never borrow a past project's style or assets.
+4. Codex edits ONLY tracked files under `projects/<slug>/`, writes `.render-loop/decision.json` with boolean `continue`; automation checks it edited no unrelated project or workflow.
+5. If a change is warranted, rerender and review the new strip; repeat for at most one additional fix and final render. Stop early when acceptable, unchanged or failed.
+6. Upload MP4s, review strips, decisions and verified metadata to GitHub Artifacts. If code changed, push a uniquely named `blender-autopilot/<slug>/<run-id>` branch and propose a PR when GitHub allows it. Never auto-merge.
+
+**How Codex starts it automatically for each NEW project:** after auditing that project's sources and creating `projects/<slug>/render-preview.sh`, commit a project-specific driver workflow `.github/workflows/render-<slug>.yml` configured with `on: push` scoped to the project. Driver calls this reusable workflow using `jobs.visual.uses: ./.github/workflows/blender-visual-autopilot.yml` and inputs `project_slug: <slug>`, `max_rounds: 3`, passing secret `OPENAI_API_KEY`. The GitHub connector's push to the driver path then starts the run without the user clicking Run workflow.
+
+Example driver (replace `new-project-demo` with the actual slug):
+
+~~~yaml
+name: New project preview autopilot
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'projects/new-project-demo/**'
+      - '.github/workflows/render-new-project-demo.yml'
+  workflow_dispatch:
+jobs:
+  visual:
+    uses: ./.github/workflows/blender-visual-autopilot.yml
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      project_slug: new-project-demo
+      max_rounds: 3
+    secrets:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+~~~
+
+**One-time requirement:** in repo Settings → Secrets and variables → Actions, the owner sets `OPENAI_API_KEY` as a repository secret. Do not request the key in chat or commit it. The ChatGPT subscription does not include OpenAI API calls; this loop incurs separate API costs plus GitHub Actions minutes. If no secret is configured, it stops at validation before rendering.
+
+**Why the loop stays within one run:** a push performed from GitHub Actions using the default `GITHUB_TOKEN` does not trigger another push workflow. No infinite retry loops. Do not assume the ChatGPT conversation monitors jobs in the background after the turn ends.
+
+**Quality and safety:** new project sources are the only style authority. First examine every supplied file, including assets; do not replace the native Blender renderer with 2D mockups. Restrict auto iteration to at most 3 previews and maximum 180 minutes, allow early stop, keep an artifact record and check output for genuine rendered frames. A PR is not a merged change or finished project.
