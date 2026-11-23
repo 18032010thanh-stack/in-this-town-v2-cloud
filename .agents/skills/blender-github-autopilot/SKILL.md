@@ -34,16 +34,16 @@ Use this skill when the user requests Blender 3D, animation, video rendering, cl
 
 - Discover available GitHub tools first. Read the active repo's default branch, visibility, permissions, Actions status, existing workflow runs and its AGENTS.md.
 - Known connected account/repo example (not an asset/style source): **18032010thanh-stack/in-this-town-v2-cloud**. This is an existing GitHub Actions host, but it is **PUBLIC**; new projects must not be published there by default if assets might be private, unlicensed or restricted. Use a permitted private repo if available, or request one authorization decision.
-- Do not needlessly ask for repo links if the user has already supplied an accessible one. Keep independent projects under project-specific paths such as \`projects/<unique-slug>/\`, with independent workflows, output names, artifact names, cache keys and concurrency groups.
+- Do not needlessly ask for repo links if the user has already supplied an accessible one. Keep independent projects under project-specific paths such as `projects/<unique-slug>/`, with independent workflows, output names, artifact names, cache keys and concurrency groups.
 - Existing V2 files/workflow remain untouched during unrelated projects. Never make new projects depend on V2 files, even if they share a repository.
-- If tools cannot create a repo or issue \`workflow_dispatch\`, use an existing **authorized** repo, add a project-scoped GitHub workflow with \`on: push\` paths matching only that project, and push via GitHub connector. This previously worked. Do not claim execution before an Actions run actually appears.
+- If tools cannot create a repo or issue `workflow_dispatch`, use an existing **authorized** repo, add a project-scoped GitHub workflow with `on: push` paths matching only that project, and push via GitHub connector. This previously worked. Do not claim execution before an Actions run actually appears.
 
 ### 2. Inventory and understand the *entire* new pack
 
 - Open archive safely; enumerate **every** member, include nested archives and hidden files, verify no extraction errors; inspect source text and image/scene/asset previews where possible.
 - Determine actual source execution entrypoint, libraries, supported Blender version, inputs and outputs, asset license status, required remote services, expected style, supported cameras/sets, audio and subtitle timing.
-- Write \`projects/<slug>/audit.json\` or \`audit.md\`: file inventory, sha hashes, style sheet, shot/asset dependency map, unresolved items and a manifest.
-- Write \`projects/<slug>/render-plan.json\`: selected segment, source files, fps, resolution, engine, quality, frame ranges, chunking, artifacts and cost/time budget.
+- Write `projects/<slug>/audit.json` or `audit.md`: file inventory, sha hashes, style sheet, shot/asset dependency map, unresolved items and a manifest.
+- Write `projects/<slug>/render-plan.json`: selected segment, source files, fps, resolution, engine, quality, frame ranges, chunking, artifacts and cost/time budget.
 - Check README and source tests: files must actually be opened, not "guessed from names". If required assets are missing, identify precisely; do not fabricate them without permission.
 
 ### 3. Build a trustworthy, isolated adapter
@@ -51,7 +51,7 @@ Use this skill when the user requests Blender 3D, animation, video rendering, cl
 - Prefer project's native Blender Python entrypoint, .blend file, and project-specific rendering pipeline. Add a small adapter for headless runs if needed.
 - Make rendering deterministic: seeds, frame start/end, scene/camera setup, texture path handling, background, audio alignment, global timeline and cache fingerprint.
 - Separate source, scratch workspace, frames, chunk MP4s, final MP4, SRT/captions and logs.
-- Verify native fonts/characters and third-party runtime libraries on Linux. Missing graphical libs in CI (e.g. \`ImportError: libEGL.so.1\`) should lead to checking/installing the correct OS dependency (e.g. \`libegl1\`) *after verifying the current distro and package*. Do not substitute a new render style to bypass dependencies.
+- Verify native fonts/characters and third-party runtime libraries on Linux. Missing graphical libs in CI (e.g. `ImportError: libEGL.so.1`) should lead to checking/installing the correct OS dependency (e.g. `libegl1`) *after verifying the current distro and package*. Do not substitute a new render style to bypass dependencies.
 - Do not commit generated frames, full MP4 or secrets into Git. Use GitHub Actions Artifacts.
 
 ### 4. Run REAL preflight and budget checks first
@@ -60,18 +60,18 @@ Preflight must run on the **same class of GitHub runner** as full rendering:
 
 - Validate source integrity, environment, licenses/provenance summary, dependencies, project-specific tests, all referenced asset paths, cameras and source frames.
 - Render at least **one real full-quality/full-resolution Blender frame**, plus a short moving sample (e.g. 24–48 frames), by the project's actual Blender engine, not a mock.
-- Verify with \`ffprobe\`: codec, width, height, FPS, frame count and duration. Inspect several actual frames for texture loading, lighting, camera framing, anatomy, missing props, subtitle overlap and motion.
+- Verify with `ffprobe`: codec, width, height, FPS, frame count and duration. Inspect several actual frames for texture loading, lighting, camera framing, anatomy, missing props, subtitle overlap and motion.
 - Test narration, SRT timing/word highlighting, optional sound tracks and output encoding **before** running all render chunks.
 - Estimate total job minutes from measured benchmark × target frames; set sensible job timeout, max parallelism (usually 2–3 initially), chunk length and artifact retention. Avoid runs that clearly exceed quotas/budget.
 
 ### 5. Implement a GitHub Actions pipeline that starts on push
 
-Use an **isolated** \`.github/workflows/render-<slug>.yml\` with:
-- \`on: push\` scoped to only \`projects/<slug>/**\` and the new workflow path, plus optional \`workflow_dispatch\`. This allows authorized GitHub tool **file updates/commits to start rendering without asking the user to click**.
-- \`permissions: contents: read\` as the minimum; if publishing a Release, grant \`contents: write\` only in that job and only for user-authorized publish.
-- A project-specific \`concurrency.group\` and \`cancel-in-progress: false\`; avoid duplicated costly renders. Note that concurrency groups are **case-insensitive** and need to include the project identifier.
-- Stages: \`preflight\` → \`render\` matrix with max-parallel → \`assemble\` after all chunks succeed → \`verify\` / artifact upload. Do not run full matrix if preflight fails.
-- Prefer \`actions/checkout@v6\`, \`actions/upload-artifact@v6\`, \`actions/download-artifact@v7\` only if supported by current runner, and check latest versions when creating a new workflow.
+Use an **isolated** `.github/workflows/render-<slug>.yml` with:
+- `on: push` scoped to only `projects/<slug>/**` and the new workflow path, plus optional `workflow_dispatch`. This allows authorized GitHub tool **file updates/commits to start rendering without asking the user to click**.
+- `permissions: contents: read` as the minimum; if publishing a Release, grant `contents: write` only in that job and only for user-authorized publish.
+- A project-specific `concurrency.group` and `cancel-in-progress: false`; avoid duplicated costly renders. Note that concurrency groups are **case-insensitive** and need to include the project identifier.
+- Stages: `preflight` → `render` matrix with max-parallel → `assemble` after all chunks succeed → `verify` / artifact upload. Do not run full matrix if preflight fails.
+- Prefer `actions/checkout@v6`, `actions/upload-artifact@v6`, `actions/download-artifact@v7` only if supported by current runner, and check latest versions when creating a new workflow.
 - Persist each chunk to an independent uniquely named artifact. Verify all parts before concatenating; ensure same codecs, FPS/resolution. Use accurate global frame ranges and checksums, including last shorter chunk.
 - Assemble with FFmpeg, mux **source-authorized** audio, burn or mux captions as required, upload final video + SRT + verification report as artifacts.
 - **Do not default to publishing via GitHub Releases or sharing new source assets publicly.** Publish only if the user already authorized publishing those *specific* materials.
@@ -80,10 +80,10 @@ Use an **isolated** \`.github/workflows/render-<slug>.yml\` with:
 
 - Through connected GitHub tools, create files/trees/commits/ref updates; check the write result and final commit SHA. Avoid altering unrelated workflows or a legacy project.
 - Once a push-triggered workflow is committed, read Actions runs and match its workflow name/commit SHA. **Never invent a run ID or assert a job ran from successful Git commit alone.**
-- Poll or revisit run status, job steps, logs and artifacts while actively executing the task. Distinguish \`queued\`, \`in_progress\`, \`success\`, \`failure\` and \`cancelled\`.
+- Poll or revisit run status, job steps, logs and artifacts while actively executing the task. Distinguish `queued`, `in_progress`, `success`, `failure` and `cancelled`.
 - On failure: retrieve failed job logs, identify first actual error, apply the smallest source-safe fix, commit only changed files and trigger a new job. Prefer retrying failing jobs/chunks if supported. Verify a failure is resolved before proceeding; avoid blind random retries and endless loops. After 2–3 failed attempts or a material budget issue, report concise blocker and stop.
-- This is a **real recent example**, not an instruction to reuse V2 data: one GitHub Actions run failed at \`rt_faces.py\` with \`ImportError: libEGL.so.1\` in a headless runner. The correct approach is to inspect native dependencies/logs and fix the runner, not change visual style.
-- After \`completed + success\`: inspect \`assemble\` and artifact listing; download the *actual* artifact through the connector or the GitHub link. If downloadable locally, extract and run \`ffprobe\`; inspect video start/middle/end and cuts. **Only provide a sandbox file link if the exact path exists.**
+- This is a **real recent example**, not an instruction to reuse V2 data: one GitHub Actions run failed at `rt_faces.py` with `ImportError: libEGL.so.1` in a headless runner. The correct approach is to inspect native dependencies/logs and fix the runner, not change visual style.
+- After `completed + success`: inspect `assemble` and artifact listing; download the *actual* artifact through the connector or the GitHub link. If downloadable locally, extract and run `ffprobe`; inspect video start/middle/end and cuts. **Only provide a sandbox file link if the exact path exists.**
 - If the task extends beyond a single chat session: GitHub Actions continues independently, but the agent **does not remain running in the background**. Configure supported scheduled monitoring/notifications where available and authorized; otherwise provide exact run/artifact URLs and an honest status. Do not promise later delivery unsupported by the environment.
 
 ### 7. Completion criteria
@@ -98,16 +98,16 @@ Mark **COMPLETE** only when all are true:
 
 ## Recommended task response without extra questions
 
-\`\`\`text
+```text
 Tôi sẽ dùng skill blender-github-autopilot. Tôi sẽ tự kiểm tra toàn bộ file dự án mới,
 giữ đúng asset/style của dự án đó, chạy Blender thật trên GitHub Actions bằng push,
 tự đọc log và sửa lỗi, lấy MP4/artifact về, chỉ hỏi nếu thiếu quyền hoặc có rủi ro công khai.
 Trước tiên làm đoạn test chất lượng sản xuất, không render full khi chưa được yêu cầu.
-\`\`\`
+```
 
 ## Optional manifest starter (source rules win)
 
-\`\`\`json
+```json
 {
   "project_id": "unique-current-project-slug",
   "source_root": "projects/unique-current-project-slug/source",
@@ -121,6 +121,6 @@ Trước tiên làm đoạn test chất lượng sản xuất, không render ful
   "max_parallel": 3,
   "release_publicly": false
 }
-\`\`\`
+```
 
 **Important:** This document is a reusable orchestration skill, **not** a new rendering service, persistent daemon, account-level installation, or guaranteed authorization to spend cloud resources. The current user's more specific instructions always take precedence.
