@@ -1,0 +1,15 @@
+name: Kreelux connection check
+on:
+  push:
+    paths:
+      - .github/workflows/kreelux-connection-check.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm GitHub Actions works
+        run: echo 'Kreelux Actions connection works'
