@@ -11,3 +11,7 @@ For any new Blender project, animation, video, ZIP/asset pack, preview render or
 - GitHub CI can continue after the chat finishes; the chat assistant itself cannot continue asynchronously without a scheduled automation.
 
 The existing root V2 production test is historical project-specific material, **not the default source of style or assets** for new tasks.
+
+## Autonomous render → visual inspection → fix loop
+
+For any NEW Blender project whose preview render needs iterative improvements, invoke the reusable workflow at `.github/workflows/blender-visual-autopilot.yml` as specified in the `blender-github-autopilot` skill. Have the NEW project provide its own `projects/<slug>/render-preview.sh`, `ci-setup.sh` if needed, and a project-scoped push trigger. Codex will inspect a contact sheet of three actual Blender frames, edit only that project, rerender (up to 3 render rounds), and open a review PR for changes when permitted. Do not reuse style or assets from this repository's V2 production test. Require `OPENAI_API_KEY` as a GitHub Actions secret; never put the API key in source code or conversation. The workflow does not self-start until a new project-specific trigger is committed or a manual run is requested.
