@@ -1,68 +1,46 @@
-name: Blender Autopilot — render, inspect, fix (bounded)
+name: Blender preview QA — ChatGPT Plus + Codex Cloud
 on:
   workflow_call:
     inputs:
       project_slug:
         type: string
         required: true
-      max_rounds:
-        type: number
-        required: false
-        default: 3
-    secrets:
-      OPENAI_API_KEY:
-        required: true
   workflow_dispatch:
     inputs:
       project_slug:
-        description: 'Project directory name below projects/'
+        description: 'Current project under projects/ (do not reuse older assets)'
         type: string
         required: true
-      max_rounds:
-        description: 'Max previews: 1, 2 or 3'
-        type: choice
-        required: true
-        options: ['1','2','3']
-        default: '3'
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 concurrency:
-  group: blender-vision-${{ github.ref }}-${{ inputs.project_slug }}
+  group: blender-preview-${{ github.ref }}-${{ inputs.project_slug }}
   cancel-in-progress: false
 
 jobs:
-  visual-loop:
-    name: Preview & refine / ${{ inputs.project_slug }}
+  render-preview:
+    name: Render real Blender evidence for ${{ inputs.project_slug }}
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 90
     env:
       PROJECT_SLUG: ${{ inputs.project_slug }}
-      MAX_ROUNDS: ${{ inputs.max_rounds }}
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Validate key, bounded rounds and project
-        env:
-          KEY_PRESENT: ${{ secrets.OPENAI_API_KEY != '' }}
+
+      - name: Validate project and required native Blender renderer
         run: |
           set -euo pipefail
-          if [[ "$KEY_PRESENT" != true ]]; then
-            echo "::error::Configure OPENAI_API_KEY in GitHub Actions Secrets before running."
-            exit 1
-          fi
-          if [[ ! "$MAX_ROUNDS" =~ ^[123]$ ]]; then
-            echo "::error::max_rounds must be 1,2 or 3"
-            exit 1
-          fi
           if [[ ! "$PROJECT_SLUG" =~ ^[a-z0-9][a-z0-9-]{1,62}$ ]]; then
-            echo "::error::Project slug invalid"
+            echo "::error::Invalid project slug"
             exit 1
           fi
-          test -f "projects/$PROJECT_SLUG/render-preview.sh"
-      - name: Install Blender, FFmpeg and independent project deps
+          test -f "projects/$PROJECT_SLUG/render-preview.sh" || {
+            echo "::error::Codex must prepare a native render-preview.sh for this project first."
+            exit 1
+          }
+          echo "Rendering independent project: $PROJECT_SLUG"
+
+      - name: Install Blender, FFmpeg and project requirements
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y blender ffmpeg python3-venv
@@ -70,72 +48,32 @@ jobs:
             bash "projects/$PROJECT_SLUG/ci-setup.sh"
           fi
           blender --version | head -n 2
-      - name: Render native Blender sample — round 0
-        run: python3 .github/scripts/blender_visual_loop.py render --slug "$PROJECT_SLUG" --round 0
-      - name: AI inspect image and fix this project's code — review 1
-        if: ${{ inputs.max_rounds >= 2 }}
-        uses: openai/codex-action@v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: .github/prompts/blender-visual-review.md
-          codex-args: '["--image",".render-loop/r0/review_strip.png"]'
-          permission-profile: ':workspace'
-          safety-strategy: drop-sudo
-          output-file: .render-loop/review1.txt
-      - name: Validate review 1 decision and changes
-        id: gate1
-        if: ${{ inputs.max_rounds >= 2 }}
-        run: python3 .github/scripts/blender_visual_loop.py gate --slug "$PROJECT_SLUG" --round 1
-      - name: Rerender improved sample — round 1
-        if: ${{ steps.gate1.outputs.iterate == 'true' }}
-        run: python3 .github/scripts/blender_visual_loop.py render --slug "$PROJECT_SLUG" --round 1
-      - name: AI inspect updated image and fix again — review 2
-        if: ${{ inputs.max_rounds >= 3 && steps.gate1.outputs.iterate == 'true' }}
-        uses: openai/codex-action@v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: .github/prompts/blender-visual-review.md
-          codex-args: '["--image",".render-loop/r1/review_strip.png"]'
-          permission-profile: ':workspace'
-          safety-strategy: drop-sudo
-          output-file: .render-loop/review2.txt
-      - name: Validate review 2 decision and changes
-        id: gate2
-        if: ${{ inputs.max_rounds >= 3 && steps.gate1.outputs.iterate == 'true' }}
-        run: python3 .github/scripts/blender_visual_loop.py gate --slug "$PROJECT_SLUG" --round 2
-      - name: Render final corrected sample — round 2
-        if: ${{ steps.gate2.outputs.iterate == 'true' }}
-        run: python3 .github/scripts/blender_visual_loop.py render --slug "$PROJECT_SLUG" --round 2
-      - name: Push safe changes to isolated review branch, create PR if permitted
-        if: ${{ success() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
+          ffmpeg -version | head -n 1
+
+      - name: Render actual Blender video and extract three QA images
         run: |
-          set -euo pipefail
-          if git diff --quiet -- "projects/$PROJECT_SLUG"; then
-            echo "No tracked project edits; no PR required." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          branch="blender-autopilot/$PROJECT_SLUG/$GITHUB_RUN_ID"
-          git switch -c "$branch"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -u -- "projects/$PROJECT_SLUG"
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Autopilot improve $PROJECT_SLUG Blender preview"
-          gh auth setup-git
-          git push --set-upstream origin "$branch"
-          gh pr create --base "$GITHUB_REF_NAME" --head "$branch" \
-            --title "Blender visual QA: $PROJECT_SLUG (run $GITHUB_RUN_ID)" \
-            --body "Autonomous visual Blender QA, previews and fixes. Review before merging. Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            || echo "::warning::Branch pushed; PR creation was blocked by repo policy."
-          echo "Autopilot patch: $branch" >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload full visual evidence and videos
+          python3 .github/scripts/blender_visual_loop.py render --slug "$PROJECT_SLUG" --round 0
+
+      - name: Save real video, early/middle/late frames and QA metadata
         if: ${{ always() }}
         uses: actions/upload-artifact@v6
         with:
-          name: blender-loop-${{ inputs.project_slug }}-${{ github.run_id }}
+          name: blender-preview-${{ inputs.project_slug }}-${{ github.run_id }}
           path: .render-loop/
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Explain how Codex Cloud continues the iteration with Plus
+        if: ${{ success() }}
+        run: |
+          {
+            echo "## Blender preview rendered and verified"
+            echo "Project: \`$PROJECT_SLUG\`"
+            echo "Artifact: \`blender-preview-$PROJECT_SLUG-$GITHUB_RUN_ID\`"
+            echo "Frames: beginning, middle and end of the REAL Blender preview."
+            echo "Continue in the ChatGPT Plus Codex Cloud task: download this artifact,"
+            echo "inspect its images and logs, edit only projects/$PROJECT_SLUG,"
+            echo "and push a project-specific code change to rerender."
+            echo "No OpenAI API key, external model charge, or unattended in-workflow Codex invocation."
+          } >> "$GITHUB_STEP_SUMMARY"
