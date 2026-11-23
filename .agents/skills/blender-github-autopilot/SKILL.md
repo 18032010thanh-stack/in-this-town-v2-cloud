@@ -126,24 +126,28 @@ Trước tiên làm đoạn test chất lượng sản xuất, không render ful
 **Important:** This document is a reusable orchestration skill, **not** a new rendering service, persistent daemon, account-level installation, or guaranteed authorization to spend cloud resources. The current user's more specific instructions always take precedence.
 
 
-## Automatic screenshot → code fix → rerender loop
+## ChatGPT Plus + Codex Cloud: preview → inspect → improve → preview
 
-The reusable GitHub workflow `.github/workflows/blender-visual-autopilot.yml` supports new projects **independently of any old project's assets or style**.
+**No OPENAI_API_KEY or separately billed OpenAI API is required for this mode.** Codex Cloud runs from the user's eligible ChatGPT Plus account, with the plan's usage limits. GitHub Actions is the separate compute/render environment. Do NOT put `openai/codex-action` or OpenAI API calls into GitHub Actions when the user has chosen Plus-only operation.
 
-**Loop implemented (bounded to 3 renders, 2 Codex edits):**
-1. Run `projects/<slug>/render-preview.sh` using the current project's own Blender pipeline. The script must output a REAL playable video at `$AUTOPILOT_OUTPUT_DIR/preview.mp4` (0.5–30 seconds). Optional `projects/<slug>/ci-setup.sh` installs dependencies.
-2. Run `ffprobe`; extract three representative frames (early, middle, late) and construct `review_strip.png` from the actual video.
-3. Send that image with `--image` to `openai/codex-action@v1`; review ONLY the current project's references, camera, models, textures, materials, animation, lighting, framing, subtitles and audio. Never borrow a past project's style or assets.
-4. Codex edits ONLY tracked files under `projects/<slug>/`, writes `.render-loop/decision.json` with boolean `continue`; automation checks it edited no unrelated project or workflow.
-5. If a change is warranted, rerender and review the new strip; repeat for at most one additional fix and final render. Stop early when acceptable, unchanged or failed.
-6. Upload MP4s, review strips, decisions and verified metadata to GitHub Artifacts. If code changed, push a uniquely named `blender-autopilot/<slug>/<run-id>` branch and propose a PR when GitHub allows it. Never auto-merge.
+### One Codex Cloud task orchestrates the available steps
 
-**How Codex starts it automatically for each NEW project:** after auditing that project's sources and creating `projects/<slug>/render-preview.sh`, commit a project-specific driver workflow `.github/workflows/render-<slug>.yml` configured with `on: push` scoped to the project. Driver calls this reusable workflow using `jobs.visual.uses: ./.github/workflows/blender-visual-autopilot.yml` and inputs `project_slug: <slug>`, `max_rounds: 3`, passing secret `OPENAI_API_KEY`. The GitHub connector's push to the driver path then starts the run without the user clicking Run workflow.
+1. Select the current NEW project's assets and style. Inspect every source file, document, rig, camera, texture, audio and dependency; never use another project's visual design.
+2. Create `projects/<slug>/render-preview.sh` to execute this project's **real Blender renderer**, outputting `$AUTOPILOT_OUTPUT_DIR/preview.mp4` (0.5–30 seconds). An optional `projects/<slug>/ci-setup.sh` installs project dependencies. Do not substitute a 2D mock.
+3. Configure a **project-scoped push-triggered** driver workflow that calls the reusable `.github/workflows/blender-visual-autopilot.yml`. Its sole responsibility is to run Blender, generate a 3-frame image strip and upload verified MP4/PNG/report artifacts. It does **not** call Codex inside the GitHub job.
+4. Codex Cloud pushes the new/updated project and driver via its available GitHub connection. Verify that GitHub Actions actually starts and succeeds. Read logs on error; fix the underlying dependency or renderer; push again as justified.
+5. Download the **real** artifact `blender-preview-<slug>-<run-id>` from GitHub. Inspect the three frames and MP4 against the current project's **own** style specification; examine source, motion, framing, material, lighting, subtitles and audio.
+6. If there is a meaningful visual defect, revise only that project's tracked files and push to rerender. Recheck the new artifact. Limit to **3 actual render attempts and at most 2 visual correction rounds** per Codex task. Stop early when acceptable, blocked, over budget, or user approval is required.
+7. Provide the verified preview/artifact link, run/commit IDs, improvements made, quality limitations and costs/usage caveats. Do not falsely claim continuous autonomous monitoring after the Codex task ends.
 
-Example driver (replace `new-project-demo` with the actual slug):
+**Important:** GitHub Actions cannot use the user's ChatGPT Plus Codex entitlement to call the model. Only an active Codex Cloud task (or a supported separately configured scheduled/event-triggered agent capability, if available) can make AI-driven edits without separately billed API use. A GitHub push job can keep rendering after Codex finishes, but AI inspection and code changes do **not** happen continuously by themselves inside GitHub Actions.
+
+### Example: new project push trigger
+
+Create `.github/workflows/render-new-project-demo.yml` for the actual slug:
 
 ~~~yaml
-name: New project preview autopilot
+name: New project Blender preview
 on:
   push:
     branches: [main]
@@ -152,20 +156,28 @@ on:
       - '.github/workflows/render-new-project-demo.yml'
   workflow_dispatch:
 jobs:
-  visual:
+  preview:
     uses: ./.github/workflows/blender-visual-autopilot.yml
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     with:
       project_slug: new-project-demo
-      max_rounds: 3
-    secrets:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ~~~
 
-**One-time requirement:** in repo Settings → Secrets and variables → Actions, the owner sets `OPENAI_API_KEY` as a repository secret. Do not request the key in chat or commit it. The ChatGPT subscription does not include OpenAI API calls; this loop incurs separate API costs plus GitHub Actions minutes. If no secret is configured, it stops at validation before rendering.
+No `secrets` block and no API token. The newly committed driver triggers GitHub Actions on project commits. If the Codex task can read the run and artifact within its allowed execution window, it can continue analyzing and pushing the next change in the **same Codex task**. Otherwise the user can open the original Codex task to continue; do not pretend an unattended future action was arranged.
 
-**Why the loop stays within one run:** a push performed from GitHub Actions using the default `GITHUB_TOKEN` does not trigger another push workflow. No infinite retry loops. Do not assume the ChatGPT conversation monitors jobs in the background after the turn ends.
+### Suggested single-task prompt for Codex Plus
 
-**Quality and safety:** new project sources are the only style authority. First examine every supplied file, including assets; do not replace the native Blender renderer with 2D mockups. Restrict auto iteration to at most 3 previews and maximum 180 minutes, allow early stop, keep an artifact record and check output for genuine rendered frames. A PR is not a merged change or finished project.
+~~~text
+Use blender-github-autopilot on my newly supplied project only.
+Read all the files, preserve this project's exact assets and style,
+create a short production-grade Blender preview in the project's own folder.
+Use GitHub Actions through project-scoped pushes to render; retrieve and inspect
+the actual images/videos, repair visual or technical defects, and rerender up to
+three times without asking about incidental steps. Report verified MP4, artifact,
+commit and run links. Do not use an OpenAI API key or old project assets.
+~~~
+
+The existing file `.github/prompts/blender-visual-review.md` is a reusable *instruction document* for a Codex task, not evidence that a GitHub-hosted AI loop is active. The previous `.github/scripts/blender_visual_loop.py` can still generate a video/strip and reports for one pass. The **old API-key-dependent GitHub workflow has been replaced** with a real Blender-only preview workflow.
+
+**Security and cost:** do not upload confidential or unlicensed project files to a public repo without explicit permission. GitHub Actions usage is subject to GitHub limits; Codex Plus is subject to its own usage limits. Stop at a short test unless the user authorized a full film.
